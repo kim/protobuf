@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE KindSignatures #-}
@@ -21,11 +22,12 @@ import Control.DeepSeq (NFData)
 import Control.Monad.Identity
 import Data.Monoid
 import Data.Tagged
+import GHC.TypeLits
 
 -- field rules
-type Optional (n :: *) a = Tagged n (Maybe a)
-type Required (n :: *) a = Tagged n (Identity a)
-type Repeated (n :: *) a = Tagged n [a]
+type Optional (n :: Nat) a = Tagged n (Maybe a)
+type Required (n :: Nat) a = Tagged n (Identity a)
+type Repeated (n :: Nat) a = Tagged n [a]
 
 instance Show a => Show (Required n a) where
   show (Tagged (Identity x)) = show (Tagged x :: Tagged n a)

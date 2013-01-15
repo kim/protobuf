@@ -22,9 +22,9 @@ import Data.Monoid
 import Data.Serialize.Get
 import Data.Tagged
 import Data.Traversable
-import qualified Data.TypeLevel as Tl
 
 import GHC.Generics
+import GHC.TypeLits
 
 import Data.ProtocolBuffers.Types
 import Data.ProtocolBuffers.Wire
@@ -59,23 +59,23 @@ instance (GDecode a, GDecode b) => GDecode (a :*: b) where
 instance (GDecode x, GDecode y) => GDecode (x :+: y) where
   gdecode msg = L1 <$> gdecode msg <|> R1 <$> gdecode msg
 
-instance (Wire a, Monoid a, Tl.Nat n) => GDecode (K1 i (Optional n a)) where
+instance (Wire a, Monoid a, SingI n) => GDecode (K1 i (Optional n a)) where
   gdecode msg =
-    let tag = fromIntegral $ Tl.toInt (undefined :: n)
+    let tag = fromIntegral $ fromSing (sing :: Sing n)
     in case HashMap.lookup tag msg of
       Just val -> K1 . Tagged <$> foldMapM decodeWire val
       Nothing  -> pure $ K1 mempty
 
-instance (Wire a, Tl.Nat n) => GDecode (K1 i (Repeated n a)) where
+instance (Wire a, SingI n) => GDecode (K1 i (Repeated n a)) where
   gdecode msg =
-    let tag = fromIntegral $ Tl.toInt (undefined :: n)
+    let tag = fromIntegral $ fromSing (sing :: Sing n)
     in case HashMap.lookup tag msg of
       Just val -> K1 . Tagged <$> traverse decodeWire val
       Nothing  -> pure $ K1 mempty
 
-instance (Wire a, Monoid a, Tl.Nat n) => GDecode (K1 i (Required n a)) where
+instance (Wire a, Monoid a, SingI n) => GDecode (K1 i (Required n a)) where
   gdecode msg =
-    let tag = fromIntegral $ Tl.toInt (undefined :: n)
+    let tag = fromIntegral $ fromSing (sing :: Sing n)
     in case HashMap.lookup tag msg of
       Just val -> K1 . Tagged . Identity <$> foldMapM decodeWire val
       Nothing  -> empty

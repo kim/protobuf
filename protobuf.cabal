@@ -42,7 +42,6 @@ library
     mtl,
     tagged,
     text,
-    type-level,
     unordered-containers
   ghc-options:
     -Wall
