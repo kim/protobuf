@@ -29,7 +29,10 @@ import GHC.TypeLits
 import Data.ProtocolBuffers.Types
 import Data.ProtocolBuffers.Wire
 
+-- |
+-- Decode a Protocol Buffers message.
 decodeMessage :: Decode a => Get a
+{-# INLINE decodeMessage #-}
 decodeMessage = decode =<< go HashMap.empty where
   go msg = do
     mfield <- Just <$> getField <|> return Nothing
@@ -37,18 +40,24 @@ decodeMessage = decode =<< go HashMap.empty where
       Just v  -> go $! HashMap.insertWith (flip (++)) (fieldTag v) [v] msg
       Nothing -> return msg
 
+-- |
+-- Decode a Protocol Buffers message prefixed with a 32-bit integer describing it's length.
 decodeLengthPrefixedMessage :: Decode a => Get a
+{-# INLINE decodeLengthPrefixedMessage #-}
 decodeLengthPrefixedMessage = do
   len <- getWord32le
   isolate (fromIntegral len) decodeMessage
 
 class Decode (a :: *) where
-  decode :: (Alternative m, Monad m) => HashMap Tag [Field] -> m a
-  default decode :: (Alternative m, Monad m, Generic a, GDecode (Rep a)) => HashMap Tag [Field] -> m a
+  decode :: HashMap Tag [Field] -> Get a
+  default decode :: (Generic a, GDecode (Rep a)) => HashMap Tag [Field] -> Get a
   decode = fmap to . gdecode
 
+instance Decode (HashMap Tag [Field]) where
+  decode = pure
+
 class GDecode (f :: * -> *) where
-  gdecode :: (Alternative m, Monad m) => HashMap Tag [Field] -> m (f a)
+  gdecode :: HashMap Tag [Field] -> Get (f a)
 
 instance GDecode a => GDecode (M1 i c a) where
   gdecode = fmap M1 . gdecode

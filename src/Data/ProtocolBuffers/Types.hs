@@ -1,5 +1,9 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DeriveFoldable #-}
+{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE OverlappingInstances #-}
@@ -20,55 +24,72 @@ module Data.ProtocolBuffers.Types
 
 import Control.DeepSeq (NFData)
 import Control.Monad.Identity
+import Data.Foldable
 import Data.Monoid
 import Data.Tagged
+import Data.Traversable
 import GHC.TypeLits
 
--- field rules
+-- | Optional fields. Values that are not found will return 'Nothing'.
 type Optional (n :: Nat) a = Tagged n (Maybe a)
+
+-- | Required fields. Parsing will return 'Control.Alternative.empty' if a 'Required' value is not found while decoding.
 type Required (n :: Nat) a = Tagged n (Identity a)
+
+-- | Lists of values.
 type Repeated (n :: Nat) a = Tagged n [a]
 
 instance Show a => Show (Required n a) where
   show (Tagged (Identity x)) = show (Tagged x :: Tagged n a)
 
+-- | What will become an isomorphism lens...
 class GetValue a where
   type GetValueType a :: *
+  -- | Extract a value from it's 'Tagged' representation.
   getValue :: a -> GetValueType a
+  -- | Wrap it back up again.
   putValue :: GetValueType a -> a
 
+-- | A 'Maybe' lens on an 'Optional' field.
 instance GetValue (Optional n a) where
   type GetValueType (Tagged n (Maybe a)) = Maybe a
   getValue = unTagged
   putValue = Tagged
 
+-- | A list lens on an 'Repeated' field.
 instance GetValue (Repeated n a) where
   type GetValueType (Tagged n [a]) = [a]
   getValue = unTagged
   putValue = Tagged
 
+-- | An 'Identity' lens on an 'Required' field.
 instance GetValue (Required n a) where
   type GetValueType (Tagged n (Identity a)) = a
   getValue = runIdentity . unTagged
   putValue = Tagged . Identity
 
-newtype Enumeration (a :: *) = Enumeration Int deriving (Eq, NFData, Ord, Show)
+-- |
+-- A newtype wrapper used to distinguish 'Prelude.Enum's from other field types.
+-- 'Enumeration' fields use 'Prelude.fromEnum' and 'Prelude.toEnum' when encoding and decoding messages.
+newtype Enumeration a = Enumeration a
+  deriving (Bounded, Eq, Enum, Foldable, Functor, Ord, NFData, Show, Traversable)
 
 instance Monoid (Enumeration a) where
   -- error case is handled by getEnum but we're exposing the instance :-(
   -- really should be a Semigroup instance... if we want a semigroup dependency
-  mempty = Enumeration (error "Empty Enumeration")
+  mempty = Enumeration $ error "Empty Enumeration"
   _ `mappend` x = x
 
+-- | Similar to 'GetValue' but specialized for 'Enumeration' to avoid overlap.
 class GetEnum a where
   type GetEnumResult a :: *
   getEnum :: a -> GetEnumResult a
   putEnum :: GetEnumResult a -> a
 
-instance Enum a => GetEnum (Enumeration a) where
+instance GetEnum (Enumeration a) where
   type GetEnumResult (Enumeration a) = a
-  getEnum (Enumeration x) = toEnum x
-  putEnum = Enumeration . fromEnum
+  getEnum (Enumeration x) = x
+  putEnum = Enumeration
 
 instance Enum a => GetEnum (Optional n (Enumeration a)) where
   type GetEnumResult (Tagged n (Maybe (Enumeration a))) = Maybe a
