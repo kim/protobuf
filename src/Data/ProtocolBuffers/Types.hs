@@ -24,6 +24,7 @@ module Data.ProtocolBuffers.Types
   , Fixed(..)
   , Signed(..)
   , PackedList(..)
+  , PackedField(..)
   , GetValue(..)
   , GetEnum(..)
   ) where
@@ -47,8 +48,8 @@ type Required (n :: Nat) a = Tagged n (Identity a)
 -- | Lists of values.
 type Repeated (n :: Nat) a = Tagged n [a]
 
--- | Lists of values.
-type Packed (n :: Nat) a = Tagged n (PackedList a)
+-- | Packed values.
+type Packed (n :: Nat) a = Tagged n (PackedField (PackedList a))
 
 instance Show a => Show (Required n a) where
   show (Tagged (Identity x)) = show (Tagged x :: Tagged n a)
@@ -56,7 +57,7 @@ instance Show a => Show (Required n a) where
 instance Eq a => Eq (Required n a) where
   Tagged (Identity x) == Tagged (Identity y) = x == y
 
--- | What will become an isomorphism lens...
+-- | Functions for wrapping and unwrapping record fields
 class GetValue a where
   type GetValueType a :: *
   -- | Extract a value from it's 'Tagged' representation.
@@ -64,30 +65,34 @@ class GetValue a where
   -- | Wrap it back up again.
   putValue :: GetValueType a -> a
 
+  -- | An isomorphism lens compatible with the lens package
+  value :: Functor f => (GetValueType a -> f (GetValueType a)) -> a -> f a
+  value f = fmap putValue . f . getValue
+
 newtype Optionally a = Optionally {runOptionally :: a}
   deriving (Bounded, Eq, Enum, Foldable, Functor, Monoid, Ord, NFData, Show, Traversable, Typeable)
 
 -- | A 'Maybe' lens on an 'Optional' field.
 instance GetValue (Optional n a) where
-  type GetValueType (Tagged n (Optionally a)) = a
+  type GetValueType (Optional n a) = a
   getValue = runOptionally . unTagged
   putValue = Tagged . Optionally
 
 -- | A list lens on an 'Repeated' field.
 instance GetValue (Repeated n a) where
-  type GetValueType (Tagged n [a]) = [a]
+  type GetValueType (Repeated n a) = [a]
   getValue = unTagged
   putValue = Tagged
 
--- | A list lens on an 'Repeated' field.
+-- | A list lens on an 'Packed' field.
 instance GetValue (Packed n a) where
-  type GetValueType (Tagged n (PackedList a)) = [a]
-  getValue = unPackedList . unTagged
-  putValue = Tagged . PackedList
+  type GetValueType (Packed n a) = [a]
+  getValue = unPackedList . unPackedField . unTagged
+  putValue = Tagged . PackedField . PackedList
 
 -- | An 'Identity' lens on an 'Required' field.
 instance GetValue (Required n a) where
-  type GetValueType (Tagged n (Identity a)) = a
+  type GetValueType (Required n a) = a
   getValue = runIdentity . unTagged
   putValue = Tagged . Identity
 
@@ -126,6 +131,10 @@ class GetEnum a where
   getEnum :: a -> GetEnumResult a
   putEnum :: GetEnumResult a -> a
 
+  -- | An isomorphism lens compatible with the lens package
+  enum :: Functor f => (GetEnumResult a -> f (GetEnumResult a)) -> a -> f a
+  enum f = fmap putEnum . f . getEnum
+
 instance GetEnum (Enumeration a) where
   type GetEnumResult (Enumeration a) = a
   getEnum (Enumeration x) = x
@@ -150,6 +159,11 @@ instance Enum a => GetEnum (Repeated n (Enumeration [a])) where
   type GetEnumResult (Tagged n [Enumeration [a]]) = [a]
   getEnum = Fold.concatMap getEnum . unTagged
   putEnum = Tagged . (:[]) . Enumeration
+
+-- |
+-- A traversable functor used to select packed sequence encoding/decoding.
+newtype PackedField a = PackedField {unPackedField :: a}
+  deriving (Eq, Foldable, Functor, Monoid, NFData, Ord, Show, Traversable, Typeable)
 
 -- |
 -- A list that is stored in a packed format.
