@@ -30,6 +30,7 @@ library
     Data.ProtocolBuffers.Decode
     Data.ProtocolBuffers.Encode
     Data.ProtocolBuffers.Message
+    -- Data.ProtocolBuffers.Ppr
     Data.ProtocolBuffers.Types
     Data.ProtocolBuffers.Wire
   build-depends:
@@ -40,8 +41,30 @@ library
     deepseq,
     ghc-prim,
     mtl,
+    -- pretty,
     tagged,
     text,
+    unordered-containers
+  ghc-options:
+    -Wall
+
+executable protoc-gen-hs
+  default-language:
+    Haskell2010
+  hs-source-dirs:
+    plugin
+  main-is:
+    Main.hs
+  build-depends:
+    base              >= 3      && < 5,
+    bytestring,
+    cereal,
+    ghc-prim,
+    haskell-src-exts,
+    mtl,
+    protobuf,
+    text,
+    type-level,
     unordered-containers
   ghc-options:
     -Wall
