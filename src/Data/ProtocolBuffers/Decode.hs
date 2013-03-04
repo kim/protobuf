@@ -45,7 +45,7 @@ decodeMessage = decode =<< go HashMap.empty where
       Nothing -> return msg
 
 -- |
--- Decode a Protocol Buffers message prefixed with a zz-encoded 32-bit integer describing it's length.
+-- Decode a Protocol Buffers message prefixed with a varint encoded 32-bit integer describing it's length.
 decodeLengthPrefixedMessage :: Decode a => Get a
 {-# INLINE decodeLengthPrefixedMessage #-}
 decodeLengthPrefixedMessage = do
@@ -120,6 +120,9 @@ instance (DecodeWire a, Tl.Nat n) => GDecode (K1 i (Field n (RequiredField (Alwa
 
 instance (DecodeWire (PackedList a), Tl.Nat n) => GDecode (K1 i (Packed n a)) where
   gdecode msg = fieldDecode PackedField msg
+
+instance GDecode U1 where
+  gdecode _ = return U1
 
 -- |
 -- foldMapM implemented in a way that defers using (mempty :: b) unless the
