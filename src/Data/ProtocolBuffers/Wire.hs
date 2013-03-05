@@ -137,6 +137,7 @@ class DecodeWire a where
 
 deriving instance EncodeWire a => EncodeWire (Always (Value a))
 deriving instance EncodeWire a => EncodeWire (Last (Value a))
+deriving instance Enum a => EncodeWire (Last (Enumeration a))
 
 deriving instance DecodeWire a => DecodeWire (Always (Value a))
 deriving instance DecodeWire a => DecodeWire (Last (Value a))
