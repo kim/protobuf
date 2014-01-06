@@ -15,6 +15,7 @@ import qualified Data.ByteString as B
 import Data.Foldable
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
+import Data.Proxy
 import Data.Serialize.Put
 
 import GHC.Generics
@@ -60,9 +61,9 @@ instance (GEncode a, GEncode b) => GEncode (a :+: b) where
   gencode (L1 x) = gencode x
   gencode (R1 y) = gencode y
 
-instance (EncodeWire a, Foldable f, SingI n) => GEncode (K1 i (Field n (f a))) where
+instance (EncodeWire a, Foldable f, KnownNat n) => GEncode (K1 i (Field n (f a))) where
   gencode = traverse_ (encodeWire tag) . runField . unK1 where
-    tag = fromIntegral $ fromSing (sing :: Sing n)
+    tag = fromIntegral $ natVal (Proxy :: Proxy n)
 
 instance GEncode U1 where
   gencode _ = return ()
