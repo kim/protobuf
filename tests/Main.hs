@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE FlexibleContexts #-}
@@ -9,21 +10,20 @@
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 
-import Test.Framework (Test, defaultMain, testGroup)
-import Test.Framework.Providers.HUnit
-import Test.Framework.Providers.QuickCheck2 (testProperty)
-import Test.HUnit (Assertion, assert, assertEqual, assertFailure)
 import Test.QuickCheck
-import Test.QuickCheck.Modifiers
 import Test.QuickCheck.Property
+import Test.Tasty
+import Test.Tasty.HUnit
+import Test.Tasty.QuickCheck
 
 import GHC.Generics (Generic)
+import GHC.TypeLits
 
 import Control.Applicative
 import Control.Exception (SomeException, evaluate, try)
 import Control.Monad
-import Control.Monad.Identity
 import qualified Data.ByteString as B
 import Data.ByteString.Char8 ()
 import Data.ProtocolBuffers as Pb
@@ -32,15 +32,12 @@ import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
 import Data.Hex
 import Data.Int
-import Data.List
 import Data.Monoid
-import Data.Serialize (runGet, runPut)
+import Data.Serialize (Get, Putter, runGet, runPut)
 import Data.Proxy
 import Data.Text (Text)
-import qualified Data.Text as T
 import Data.Typeable
 import Data.Word
-import Data.TypeLevel (D1, D2, D3, D4, Nat, reifyIntegral)
 
 main :: IO ()
 main = defaultMain tests
@@ -51,14 +48,18 @@ data EnumFoo
   | EnumFoo3
     deriving (Bounded, Enum, Eq, Typeable)
 
-tests =
+tests :: TestTree
+tests = testGroup "Root"
   [ testGroup "Primitive Wire" primitiveWireTests
   , testGroup "Packed Wire" packedWireTests
   , testGroup "Required Single Values" requiredSingleValueTests
   , testGroup "Optional Single Values" optionalSingleValueTests
-  , testGroup "Tags Out of Range" tagsOutOfRangeTests
+  , testGroup "Repeated Single Values" repeatedSingleValueTests
+  -- TODO Fix and re-enable
+  --, testGroup "Tags Out of Range" tagsOutOfRangeTests
   , testProperty "Generic message coding" prop_generic
   , testProperty "Generic length prefixed message coding" prop_generic_length_prefixed
+  , testProperty "Varint prefixed bytestring" prop_varint_prefixed_bytestring
   , testCase "Google Reference Test1" test1
   , testCase "Google Reference Test2" test2
   , testCase "Google Reference Test3" test3
@@ -66,7 +67,7 @@ tests =
   , testCase "Google WireFormatTest ZigZag" wireFormatZZ
   ]
 
-primitiveTests :: (forall a . (Eq a, Typeable a, Arbitrary a, EncodeWire a, DecodeWire a) => Proxy a -> Property) -> [Test]
+primitiveTests :: (forall a . (Eq a, Typeable a, Arbitrary a, EncodeWire a, DecodeWire a) => Proxy a -> Property) -> [TestTree]
 primitiveTests f =
   [ testProperty "int32"    (f (Proxy :: Proxy Int32))
   , testProperty "int64"    (f (Proxy :: Proxy Int64))
@@ -84,10 +85,10 @@ primitiveTests f =
   , testProperty "enum"     (f (Proxy :: Proxy (Always (Enumeration EnumFoo))))
   ]
 
-primitiveWireTests :: [Test]
+primitiveWireTests :: [TestTree]
 primitiveWireTests = primitiveTests prop_wire
 
-packedWireTests :: [Test]
+packedWireTests :: [TestTree]
 packedWireTests =
   [ testProperty "int32"    (prop_wire (Proxy :: Proxy (PackedList (Value Int32))))
   , testProperty "int64"    (prop_wire (Proxy :: Proxy (PackedList (Value Int64))))
@@ -104,13 +105,16 @@ packedWireTests =
   , testProperty "bool"     (prop_wire (Proxy :: Proxy (PackedList (Value Bool))))
   ]
 
-requiredSingleValueTests :: [Test]
+requiredSingleValueTests :: [TestTree]
 requiredSingleValueTests = primitiveTests prop_req
 
-optionalSingleValueTests :: [Test]
+optionalSingleValueTests :: [TestTree]
 optionalSingleValueTests = primitiveTests prop_opt
 
-tagsOutOfRangeTests :: [Test]
+repeatedSingleValueTests :: [TestTree]
+repeatedSingleValueTests = primitiveTests prop_repeated
+
+tagsOutOfRangeTests :: [TestTree]
 tagsOutOfRangeTests = primitiveTests prop_req_out_of_range
 
 instance Arbitrary a => Arbitrary (Field n (RequiredField (Always (Value a)))) where
@@ -167,14 +171,20 @@ instance Arbitrary WireField where
 newtype RequiredValue n a = RequiredValue (Required n (Value a))
   deriving (Eq, Generic)
 
-instance (EncodeWire a, Nat n) => Encode (RequiredValue n a)
-instance (DecodeWire a, Nat n) => Decode (RequiredValue n a)
+instance (EncodeWire a, KnownNat n) => Encode (RequiredValue n a)
+instance (DecodeWire a, KnownNat n) => Decode (RequiredValue n a)
 
 newtype OptionalValue n a = OptionalValue (Optional n (Value a))
   deriving (Eq, Generic)
 
-instance (EncodeWire a, Nat n) => Encode (OptionalValue n a)
-instance (DecodeWire a, Nat n) => Decode (OptionalValue n a)
+instance (EncodeWire a, KnownNat n) => Encode (OptionalValue n a)
+instance (DecodeWire a, KnownNat n) => Decode (OptionalValue n a)
+
+newtype RepeatedValue n a = RepeatedValue (Repeated n (Value a))
+  deriving (Eq, Generic)
+
+instance (EncodeWire a, KnownNat n) => Encode (RepeatedValue n a)
+instance (DecodeWire a, KnownNat n) => Decode (RepeatedValue n a)
 
 prop_wire :: forall a . (Eq a, Arbitrary a, EncodeWire a, DecodeWire a, Typeable a) => Proxy a -> Property
 prop_wire _ = label ("prop_wire :: " ++ show (typeOf (undefined :: a))) $ do
@@ -189,36 +199,48 @@ prop_wire _ = label ("prop_wire :: " ++ show (typeOf (undefined :: a))) $ do
     Right val' -> return $ val == val'
     Left err   -> fail err
 
-prop_generic :: Property
+prop_generic :: (Arbitrary WireField) => Gen Property
 prop_generic = do
   msg <- HashMap.fromListWith (++) . fmap (\ c -> (wireFieldTag c, [c])) <$> listOf1 arbitrary
-  prop_roundtrip msg
+  prop_roundtrip_msg msg
 
-prop_generic_length_prefixed :: Property
+prop_generic_length_prefixed :: (Arbitrary WireField) => Gen Property
 prop_generic_length_prefixed = do
   msg <- HashMap.fromListWith (++) . fmap (\ c -> (wireFieldTag c, [c])) <$> listOf1 arbitrary
   let bs = runPut $ encodeLengthPrefixedMessage (msg :: HashMap Tag [WireField])
   case runGet decodeLengthPrefixedMessage bs of
-    Right msg' -> printTestCase "foo" $ msg == msg'
+    Right msg' -> return $ counterexample "foo" $ msg == msg'
     Left err   -> fail err
 
-prop_roundtrip :: (Eq a, Encode a, Decode a) => a -> Property
-prop_roundtrip msg = do
+prop_roundtrip_msg :: (Eq a, Encode a, Decode a) => a -> Gen Property
+prop_roundtrip_msg msg = do
   let bs = runPut $ encodeMessage msg
   case runGet decodeMessage bs of
-    Right msg' -> property $ msg == msg'
+    Right msg' -> return . property $ msg == msg'
     Left err   -> fail err
 
-prop_encode_fail :: Encode a => a -> Property
-prop_encode_fail msg = morallyDubiousIOProperty $ do
+prop_varint_prefixed_bytestring :: Gen Property
+prop_varint_prefixed_bytestring = do
+  bs <- B.pack <$> arbitrary
+  prop_roundtrip_value getVarintPrefixedBS putVarintPrefixedBS bs
+
+prop_roundtrip_value :: (Eq a, Show a) => Get a -> Putter a -> a -> Gen Property
+prop_roundtrip_value get put val = do
+  let bs = runPut (put val)
+  case runGet get bs of
+    Right val' -> return $ val === val'
+    Left err   -> fail err
+
+prop_encode_fail :: Encode a => a -> Gen Prop
+prop_encode_fail msg = unProperty $ ioProperty $ do
   res <- try . evaluate . runPut $ encodeMessage msg
   return $ case res :: Either SomeException B.ByteString of
     Left  _ -> True
     Right _ -> False
 
-prop_req_reify_out_of_range :: forall a r . a -> (forall n . Nat n => RequiredValue n a -> Gen r) -> Gen r
+prop_req_reify_out_of_range :: forall a r . a -> (forall n . KnownNat n => RequiredValue n a -> Gen r) -> Gen r
 prop_req_reify_out_of_range a f = do
-  let g :: forall n . Nat n => n -> Gen r
+  let g :: forall n . KnownNat n => Proxy n -> Gen r
       g _ = f (RequiredValue (putField a) :: RequiredValue n a)
   -- according to https://developers.google.com/protocol-buffers/docs/proto
   -- the max is 2^^29 - 1, or 536,870,911.
@@ -226,13 +248,12 @@ prop_req_reify_out_of_range a f = do
   -- the min is set to 0 since reifyIntegral only supports naturals, which
   -- is also recommended since these are encoded as varints which have
   -- fairly high overhead for negative tags
-  n <- choose (536870912, maxBound)
-  reifyIntegral (n :: Int32) g
+  n <- choose (536870912, toInteger $ (maxBound :: Int))
+  case someNatVal n of 
+    Just (SomeNat x) -> g x
 
-prop_req_reify :: forall a r . a -> (forall n . Nat n => RequiredValue n a -> Gen r) -> Gen r
-prop_req_reify a f = do
-  let g :: forall n . Nat n => n -> Gen r
-      g _ = f (RequiredValue (putField a) :: RequiredValue n a)
+prop_reify_valid_tag :: forall r . (forall n . KnownNat n => Proxy n -> Gen r) -> Gen r
+prop_reify_valid_tag f = do
   -- according to https://developers.google.com/protocol-buffers/docs/proto
   -- the max is 2^^29 - 1, or 536,870,911.
   --
@@ -240,37 +261,46 @@ prop_req_reify a f = do
   -- is also recommended since these are encoded as varints which have
   -- fairly high overhead for negative tags
   n <- choose (0, 536870911)
-  reifyIntegral (n :: Int32) g
+  case someNatVal n of 
+    Just (SomeNat x) -> f x
 
-prop_req_out_of_range :: forall a . (Arbitrary a, EncodeWire a) => Proxy a -> Property
-prop_req_out_of_range _ = do
+prop_req_reify :: forall a r . a -> (forall n . KnownNat n => RequiredValue n a -> Gen r) -> Gen r
+prop_req_reify a f = prop_reify_valid_tag g where
+  g :: forall n . KnownNat n => Proxy n -> Gen r
+  g _ = f (RequiredValue (putField a) :: RequiredValue n a)
+
+prop_req_out_of_range :: forall a . (Arbitrary (Value a), EncodeWire a) => Proxy a -> Property
+prop_req_out_of_range _ = MkProperty $ do
   val <- Just <$> arbitrary
   prop_req_reify_out_of_range (val :: Maybe (Value a)) prop_encode_fail
 
-prop_req :: forall a . (Arbitrary a, Eq a, EncodeWire a, DecodeWire a, Typeable a) => Proxy a -> Property
+prop_req :: forall a . (Arbitrary (Value a), Eq a, EncodeWire a, DecodeWire a, Typeable a) => Proxy a -> Property
 prop_req _ = label ("prop_req :: " ++ show (typeOf (undefined :: a))) $ do
   val <- Just <$> arbitrary
-  prop_req_reify (val :: Maybe (Value a)) prop_roundtrip
+  prop_req_reify (val :: Maybe (Value a)) prop_roundtrip_msg
 
-prop_opt_reify :: forall a r . Maybe a -> (forall n . Nat n => OptionalValue n a -> Gen r) -> Gen r
-prop_opt_reify a f = do
-  let g :: forall n . Nat n => n -> Gen r
-      g _ = f (OptionalValue (putField a) :: OptionalValue n a)
-  -- according to https://developers.google.com/protocol-buffers/docs/proto
-  -- the max is 2^^29 - 1, or 536,870,911.
-  --
-  -- the min is set to 0 since reifyIntegral only supports naturals, which
-  -- is also recommended since these are encoded as varints which have
-  -- fairly high overhead for negative tags
-  n <- choose (0, 536870911)
-  reifyIntegral (n :: Int32) g
+prop_repeated_reify :: forall a r . [a] -> (forall n . KnownNat n => RepeatedValue n a -> Gen r) -> Gen r
+prop_repeated_reify a f = prop_reify_valid_tag g where
+  g :: forall n . KnownNat n => Proxy n -> Gen r
+  g _ = f (RepeatedValue (putField a) :: RepeatedValue n a)
+
+prop_repeated :: forall a . (Arbitrary a, Eq a, EncodeWire a, DecodeWire a, Typeable a) => Proxy a -> Property
+prop_repeated _ = label ("prop_repeated :: " ++ show (typeOf (undefined :: a))) $ do
+  val <- arbitrary
+  prop_repeated_reify (val :: [a]) prop_roundtrip_msg
+
+prop_opt_reify :: forall a r . Maybe a -> (forall n . KnownNat n => OptionalValue n a -> Gen r) -> Gen r
+prop_opt_reify a f = prop_reify_valid_tag g where
+  g :: forall n . KnownNat n => Proxy n -> Gen r
+  g _ = f (OptionalValue (putField a) :: OptionalValue n a)
 
 prop_opt :: forall a . (Arbitrary a, Eq a, EncodeWire a, DecodeWire a, Typeable a) => Proxy a -> Property
 prop_opt _ = label ("prop_opt :: " ++ show (typeOf (undefined :: a))) $ do
   val <- arbitrary
-  prop_opt_reify (val :: Maybe a) prop_roundtrip
+  prop_opt_reify (val :: Maybe a) prop_roundtrip_msg
 
 -- implement the examples from https://developers.google.com/protocol-buffers/docs/encoding
+testSpecific :: (Eq a, Show a, Encode a, Decode a) => a -> B.ByteString -> IO ()
 testSpecific msg ref = do
   let bs = runPut $ encodeMessage msg
   assertEqual "Encoded message mismatch" bs ref
@@ -279,7 +309,7 @@ testSpecific msg ref = do
     Right msg' -> assertEqual "Decoded message mismatch" msg msg'
     Left err   -> assertFailure err
 
-data Test1 = Test1{test1_a :: Required D1 (Value Int32)} deriving (Generic)
+data Test1 = Test1{test1_a :: Required 1 (Value Int32)} deriving (Generic)
 deriving instance Eq Test1
 deriving instance Show Test1
 instance Encode Test1
@@ -289,7 +319,7 @@ test1 :: Assertion
 test1 = testSpecific msg =<< unhex "089601" where
   msg = Test1{test1_a = putField 150}
 
-data Test2 = Test2{test2_b :: Required D2 (Value Text)} deriving (Generic)
+data Test2 = Test2{test2_b :: Required 2 (Value Text)} deriving (Generic)
 deriving instance Eq Test2
 deriving instance Show Test2
 instance Encode Test2
@@ -299,7 +329,7 @@ test2 :: Assertion
 test2 = testSpecific msg =<< unhex "120774657374696e67" where
   msg = Test2{test2_b = putField "testing"}
 
-data Test3 = Test3{test3_c :: Required D3 (Message Test1)} deriving (Generic, Eq, Show)
+data Test3 = Test3{test3_c :: Required 3 (Message Test1)} deriving (Generic, Eq, Show)
 instance Encode Test3
 instance Decode Test3
 
@@ -307,7 +337,7 @@ test3 :: Assertion
 test3 = testSpecific msg =<< unhex "1a03089601" where
   msg = Test3{test3_c = putField Test1{test1_a = putField 150}}
 
-data Test4 = Test4{test4_d :: Packed D4 (Value Word32)} deriving (Generic, Eq, Show)
+data Test4 = Test4{test4_d :: Packed 4 (Value Word32)} deriving (Generic, Eq, Show)
 instance Encode Test4
 instance Decode Test4
 

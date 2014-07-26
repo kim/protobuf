@@ -1,5 +1,5 @@
 name:                protobuf
-version:             0.1.1
+version:             0.2.0.2
 synopsis:            Google Protocol Buffers via GHC.Generics
 description:
   Google Protocol Buffers via GHC.Generics.
@@ -15,7 +15,7 @@ description:
   .
 license:             BSD3
 license-file:        LICENSE
-extra-source-files:  LICENSE.google-protobuf, LICENSE.haskell-protocol-buffers
+extra-source-files:  LICENSE.google-protobuf, LICENSE.haskell-protocol-buffers, CHANGELOG
 author:              Steve Severance, Nathan Howell
 maintainer:          sseverance@alphaheavy.com, nhowell@alphaheavy.com
 homepage:            https://github.com/alphaHeavy/protobuf
@@ -36,6 +36,7 @@ library
   exposed-modules:
     Data.ProtocolBuffers
     Data.ProtocolBuffers.Internal
+    Data.ProtocolBuffers.Orphans
   other-modules:
     Data.ProtocolBuffers.Decode
     Data.ProtocolBuffers.Encode
@@ -44,40 +45,37 @@ library
     Data.ProtocolBuffers.Types
     Data.ProtocolBuffers.Wire
   build-depends:
-    base                       >= 4.5 && < 5,
+    base                       >= 4.7 && < 5,
     bytestring                 >= 0.9,
     cereal                     >= 0.3,
     data-binary-ieee754        >= 0.4,
     deepseq                    >= 1.1,
-    ghc-prim,
     mtl                        == 2.*,
     -- pretty,
     text                       >= 0.10,
-    type-level                 >= 0.2,
     unordered-containers       >= 0.2
   ghc-options:
     -Wall
 
---executable protoc-gen-hs
---  default-language:
---    Haskell2010
---  hs-source-dirs:
---    plugin
---  main-is:
---    Main.hs
---  build-depends:
---    base                       >= 4.5 && < 5,
---    bytestring,
---    cereal,
---    ghc-prim,
---    haskell-src-exts,
---    mtl,
---    protobuf,
---   text,    
---   type-level,
---    unordered-containers
---  ghc-options:
---    -Wall
+-- executable protoc-gen-hs
+  -- default-language:
+    -- Haskell2010
+  -- hs-source-dirs:
+    -- plugin
+  -- main-is:
+    -- Main.hs
+  -- build-depends:
+    -- base                       >= 4.7 && < 5,
+    -- bytestring,
+    -- cereal,
+    -- ghc-prim,
+    -- haskell-src-exts,
+    -- mtl,
+    -- protobuf,
+    -- text,
+    -- unordered-containers
+  -- ghc-options:
+    -- -Wall
 
 test-suite protobuf-test
   default-language:
@@ -89,8 +87,7 @@ test-suite protobuf-test
   main-is:
     Main.hs
   build-depends:
-    base                       >= 4.5 && < 5,
-    ghc-prim,
+    base                       >= 4.7 && < 5,
     bytestring,
     cereal,
     hex,
@@ -98,11 +95,10 @@ test-suite protobuf-test
     protobuf,
     tagged,
     text,
-    type-level,
     unordered-containers,
-    test-framework             >= 0.4,
-    test-framework-hunit       >= 0.2,
-    test-framework-quickcheck2 >= 0.2,
+    tasty,
+    tasty-hunit,
+    tasty-quickcheck,
     HUnit                      >= 1.2,
     QuickCheck                 >= 2.4
 
